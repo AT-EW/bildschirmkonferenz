@@ -3,18 +3,20 @@
 Browser-App für Video, Ton und Bildschirmfreigabe mit bis zu ca. 5 Personen.
 Die Einladung wird per WhatsApp verschickt, die Gesprächspartner brauchen nur den Link.
 
-## 1. Einmalig: App ins Internet stellen
+## 1. Adresse der App
 
-Damit Eingeladene den Link öffnen können, muss `index.html` unter einer **https://-Adresse** erreichbar sein.
-Kamera und Bildschirmfreigabe funktionieren im Browser nur über https. Kostenlose Möglichkeiten:
+**https://at-ew.github.io/bildschirmkonferenz/**  (am besten als Lesezeichen speichern, auch auf dem Handy)
 
-**Netlify (am einfachsten)**
-1. Auf https://app.netlify.com/drop gehen und ein kostenloses Konto anlegen.
-2. Den Ordner `Bildschirmkonferenz` per Drag & Drop in das Browserfenster ziehen.
-3. Netlify zeigt eine Adresse wie `https://irgendwas-123.netlify.app`. Das ist Ihre App.
-   Den Namen können Sie unter *Site configuration → Change site name* ändern, z. B. `thiess-konferenz.netlify.app`.
+Die App liegt per GitHub Pages im Repository https://github.com/AT-EW/bildschirmkonferenz.
+Änderungen an `index.html` gehen so online (im Ordner `Bildschirmkonferenz`):
 
-**Alternativ: GitHub Pages.** Repository anlegen, `index.html` hochladen und unter *Settings → Pages* aktivieren.
+```bash
+git add -A
+git commit -m "Änderung"
+git push
+```
+
+Nach ca. 1 Minute ist die neue Version online.
 
 Ein eigener Server ist nicht nötig: Die Teilnehmer finden sich über den öffentlichen, kostenlosen
 PeerJS-Vermittlungsdienst. Bild und Ton laufen danach direkt und verschlüsselt (DTLS-SRTP)
