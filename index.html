@@ -1,0 +1,932 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1113">
+<title>Bildschirmkonferenz</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>window.Peer || document.write('<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"><\/script>');</script>
+<style>
+  :root {
+    --bg: #0e1113; --panel: #171b1e; --panel2: #20262a; --line: #2c3439;
+    --text: #e9edef; --muted: #9aa5ab; --tile: #1a1f23;
+    --accent: #25d366; --accent-ink: #06210f; --danger: #e5483d; --warn: #f5b041;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  [hidden] { display: none !important; }
+
+  /* ---------- Startseite ---------- */
+  .lobby { min-height: 100%; display: grid; place-items: center; padding: 24px 16px; }
+  .card { width: 100%; max-width: 440px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 16px; padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; }
+  h1 { margin: 0; font-size: 24px; }
+  h2 { margin: 0; font-size: 19px; }
+  .sub { margin: -6px 0 4px; color: var(--muted); }
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+  input.f { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 12px; color: var(--text); font: inherit; font-size: 16px; width: 100%; min-width: 0; }
+  input.f:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: flex; gap: 8px; }
+  .opts { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  .chk { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
+  .chk input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .btn { border: 1px solid var(--line); background: var(--panel2); border-radius: 10px;
+    padding: 11px 16px; font-weight: 600; }
+  .btn:hover { filter: brightness(1.12); }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  .primary { background: var(--text); color: var(--bg); border-color: transparent; }
+  .wa { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .ghost { background: transparent; }
+  .hint { margin: 0; font-size: 13px; color: var(--muted); }
+  .warn { background: #3a2c10; border: 1px solid #6b4f16; color: #f7d79a; border-radius: 10px;
+    padding: 10px 12px; font-size: 13px; }
+
+  /* ---------- Konferenz ---------- */
+  #call { position: fixed; inset: 0; display: flex; flex-direction: column; }
+  .top { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 10px 16px;
+    font-size: 14px; color: var(--muted); border-bottom: 1px solid var(--line); }
+  .top b { color: var(--text); font-weight: 600; letter-spacing: .02em; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--accent); }
+  .dot.bad { background: var(--warn); }
+  .body { flex: 1; display: flex; min-height: 0; }
+  #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #spot { flex: 1; min-height: 0; padding: 8px 8px 0; display: none; }
+  #stage.has-spot #spot { display: flex; }
+  #spot .tile { flex: 1; }
+  #grid { flex: 1; min-height: 0; display: grid; gap: 8px; padding: 8px;
+    grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+    grid-template-rows: repeat(var(--rows, 1), minmax(0, 1fr)); }
+  #stage.has-spot #grid { flex: none; height: 118px; grid-template-columns: none;
+    grid-template-rows: minmax(0, 1fr); grid-auto-flow: column; grid-auto-columns: 176px; overflow-x: auto; }
+
+  .tile { position: relative; background: var(--tile); border-radius: 12px; overflow: hidden;
+    cursor: pointer; min-height: 0; outline: 2px solid transparent; outline-offset: -2px;
+    transition: outline-color .15s; }
+  .tile.speaking { outline-color: var(--accent); }
+  .tile video { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
+  .tile.screen video, #spot .tile video, .tile:fullscreen video { object-fit: contain; }
+  .tile.mirror video { transform: scaleX(-1); }
+  .avatar { position: absolute; inset: 0; display: none; place-items: center; background: var(--tile); }
+  .tile.camoff .avatar { display: grid; }
+  .avatar span { width: min(96px, 42%); aspect-ratio: 1; border-radius: 50%; background: #2f3a40;
+    display: grid; place-items: center; font-size: clamp(15px, 3.5vw, 32px); font-weight: 600; }
+  .label { position: absolute; left: 8px; bottom: 8px; display: flex; align-items: center; gap: 6px;
+    background: rgba(0, 0, 0, .58); padding: 3px 8px; border-radius: 6px; font-size: 13px;
+    max-width: calc(100% - 16px); white-space: nowrap; overflow: hidden; }
+  .label .nm { overflow: hidden; text-overflow: ellipsis; }
+  .micoff { display: none; color: #ff8a80; flex: none; }
+  .tile.muted .micoff { display: inline-flex; }
+  .label svg { width: 14px; height: 14px; }
+  .fs { position: absolute; top: 8px; right: 8px; width: 34px; height: 34px; border: 0; border-radius: 8px;
+    background: rgba(0, 0, 0, .55); display: grid; place-items: center; opacity: 0; transition: opacity .15s; }
+  .tile:hover .fs, #spot .fs { opacity: 1; }
+  .fs svg { width: 16px; height: 16px; }
+
+  .bar { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  .cb { display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: 0;
+    padding: 0; font-size: 12px; color: var(--muted); min-width: 72px; position: relative; }
+  .cb .ic { width: 48px; height: 48px; border-radius: 50%; background: var(--panel2); display: grid;
+    place-items: center; color: var(--text); transition: background .15s; }
+  .cb:hover:not(:disabled) .ic { filter: brightness(1.2); }
+  .cb.off .ic, .cb.leave .ic { background: var(--danger); color: #fff; }
+  .cb.on .ic { background: var(--accent); color: var(--accent-ink); }
+  .cb:disabled { opacity: .4; cursor: not-allowed; }
+  .cb svg { width: 22px; height: 22px; }
+  .cb.leave svg { transform: rotate(135deg); }
+  .cnt { position: absolute; top: -3px; right: 10px; background: var(--accent); color: var(--accent-ink);
+    border-radius: 9px; font-size: 11px; font-weight: 700; min-width: 18px; height: 18px;
+    display: grid; place-items: center; padding: 0 5px; }
+  @media (max-width: 560px) {
+    .cb { min-width: 46px; }
+    .cb .t { display: none; }
+    .cnt { right: -2px; }
+  }
+
+  #chat { width: 320px; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
+  @media (max-width: 760px) { #chat { position: fixed; inset: 0; width: auto; z-index: 20; border: 0; } }
+  .chat-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px;
+    font-weight: 600; border-bottom: 1px solid var(--line); }
+  .x { background: none; border: 0; width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; }
+  .x:hover { background: var(--panel2); }
+  .x svg { width: 18px; height: 18px; }
+  #msgs { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+  #msgs:empty::before { content: "Noch keine Nachrichten. Hier können Sie z. B. Links oder Werte austauschen."; color: var(--muted); font-size: 13px; }
+  .msg .who { font-size: 12px; color: var(--muted); }
+  .msg .tx { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg a { color: var(--accent); }
+  #chatForm { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+
+  .sheet { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); display: grid; place-items: center;
+    padding: 16px; z-index: 30; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  .btns .btn { flex: 1 1 auto; }
+
+  #toasts { position: fixed; top: 54px; left: 50%; transform: translateX(-50%); display: flex;
+    flex-direction: column; align-items: center; gap: 6px; z-index: 40; pointer-events: none;
+    width: calc(100% - 32px); }
+  .toast { background: #2b3338; border: 1px solid var(--line); padding: 8px 14px; border-radius: 10px;
+    font-size: 14px; box-shadow: 0 6px 20px rgba(0, 0, 0, .4); max-width: 520px; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- Startseite -->
+<section id="lobby" class="lobby">
+  <div class="card">
+    <h1>Bildschirmkonferenz</h1>
+    <p class="sub">Video, Ton und Bildschirm teilen. Die Einladung geht per WhatsApp raus.</p>
+    <div id="warn" class="warn" hidden></div>
+    <label>Ihr Name
+      <input id="nameIn" class="f" maxlength="40" autocomplete="name" placeholder="z. B. Andreas">
+    </label>
+    <label>Raum-Code
+      <div class="row">
+        <input id="roomIn" class="f" maxlength="30" spellcheck="false" autocomplete="off">
+        <button id="newRoomBtn" class="btn ghost" type="button" title="Neuen Raum-Code erzeugen">Neu</button>
+      </div>
+    </label>
+    <div class="opts">
+      <label class="chk"><input type="checkbox" id="camChk" checked> Kamera beim Start an</label>
+      <label class="chk"><input type="checkbox" id="micChk" checked> Mikrofon beim Start an</label>
+    </div>
+    <button id="joinBtn" class="btn primary" type="button">Konferenz betreten</button>
+    <button id="waLobbyBtn" class="btn wa" type="button">Einladung per WhatsApp senden</button>
+    <p class="hint">Wer den Link zuerst öffnet, eröffnet den Raum. Gedacht für bis zu ca. 5 Personen.
+      Bild und Ton laufen direkt und verschlüsselt zwischen den Teilnehmern.</p>
+  </div>
+</section>
+
+<!-- Konferenz -->
+<section id="call" hidden>
+  <header class="top">
+    <span id="dot" class="dot"></span>
+    <span>Raum <b id="roomLbl"></b></span>
+    <span id="countLbl"></span>
+    <span id="statusLbl"></span>
+  </header>
+  <div class="body">
+    <main id="stage">
+      <div id="spot"></div>
+      <div id="grid"></div>
+    </main>
+    <aside id="chat" hidden>
+      <div class="chat-head">Chat <button id="chatClose" class="x" type="button" title="Chat schließen"></button></div>
+      <div id="msgs"></div>
+      <form id="chatForm" autocomplete="off">
+        <input id="chatIn" class="f" placeholder="Nachricht …" maxlength="2000">
+        <button class="btn wa" type="submit">Senden</button>
+      </form>
+    </aside>
+  </div>
+  <nav class="bar">
+    <button id="micBtn" class="cb" type="button"><span class="ic"></span><span class="t">Mikrofon</span></button>
+    <button id="camBtn" class="cb" type="button"><span class="ic"></span><span class="t">Kamera</span></button>
+    <button id="screenBtn" class="cb" type="button"><span class="ic"></span><span class="t">Bildschirm</span></button>
+    <button id="inviteBtn" class="cb" type="button"><span class="ic"></span><span class="t">Einladen</span></button>
+    <button id="chatBtn" class="cb" type="button"><span class="ic"></span><span class="t">Chat</span><span id="unread" class="cnt" hidden></span></button>
+    <button id="leaveBtn" class="cb leave" type="button"><span class="ic"></span><span class="t">Verlassen</span></button>
+  </nav>
+</section>
+
+<!-- Einladen -->
+<div id="invite" class="sheet" hidden>
+  <div class="card">
+    <h2>Teilnehmer einladen</h2>
+    <p class="hint">Diesen Link an die Gesprächspartner schicken. Sie öffnen ihn im Browser
+      (Chrome, Edge, Safari), geben ihren Namen ein und sind im selben Raum.</p>
+    <input id="linkOut" class="f" readonly>
+    <div class="btns">
+      <button id="waBtn" class="btn wa" type="button">Per WhatsApp senden</button>
+      <button id="copyBtn" class="btn" type="button">Link kopieren</button>
+      <button id="shareBtn" class="btn" type="button" hidden>Teilen …</button>
+    </div>
+    <button id="inviteClose" class="btn ghost" type="button">Schließen</button>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+'use strict';
+
+/* ================= Grundlagen ================= */
+
+const PREFIX = 'bildkonf-v1-';          // Präfix für die Raum-ID beim Vermittlungsserver
+const PEER_OPTS = { debug: 0 };         // PeerJS-Cloud-Server mit STUN/TURN-Voreinstellung; Fehler behandelt onPeerError
+const $ = s => document.querySelector(s);
+
+const ICON = {
+  mic: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/>',
+  micOff: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="3" y1="3" x2="21" y2="21"/>',
+  cam: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m22 8-6 4 6 4V8z"/>',
+  camOff: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m22 8-6 4 6 4V8z"/><line x1="2" y1="3" x2="22" y2="21"/>',
+  screen: '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><polyline points="9 10 12 7 15 10"/><line x1="12" y1="7" x2="12" y2="13"/>',
+  invite: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/>',
+  chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>',
+  expand: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>',
+  close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'
+};
+const svg = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[name]}</svg>`;
+
+const S = {
+  me: null,             // eigener Peer (zufällige ID)
+  lobby: null,          // Peer mit der Raum-ID, falls ich den Raum "verwalte"
+  lobbyTry: null,       // laufende Raumsuche (Abbruch-Funktion)
+  room: '', name: '',
+  peers: new Map(),     // id -> { id, name, conn, call, tile, cam, mic, sharing, lobby, open }
+  out: null,            // ausgehender Stream: immer 1 Audio- + 1 Videospur
+  micTrack: null, camTrack: null, screenTrack: null, blankTrack: null, silentTrack: null,
+  spot: null, selfTile: null, audioCtx: null, unread: 0, started: false
+};
+
+const roomId = () => PREFIX + S.room;
+
+function newRoom() {
+  const a = 'abcdefghjkmnpqrstuvwxyz23456789';
+  return Array.from(crypto.getRandomValues(new Uint8Array(8)), b => a[b % a.length]).join('');
+}
+const cleanRoom = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 24);
+const fmtRoom = r => r.replace(/(.{4})(?=.)/g, '$1-');
+const initials = n => (n || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || '?';
+const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const linkify = s => esc(s).replace(/https?:\/\/[^\s<]+/g, u => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
+
+function errText(e) {
+  switch (e && e.name) {
+    case 'NotAllowedError': return 'Zugriff verweigert (Browser-Berechtigung prüfen).';
+    case 'NotFoundError': return 'kein Gerät gefunden.';
+    case 'NotReadableError': return 'Gerät wird gerade von einem anderen Programm benutzt.';
+    default: return (e && e.message) || 'unbekannter Fehler.';
+  }
+}
+
+function toast(msg, ms = 3800) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
+
+function store(key, val) {
+  try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (e) { return null; }
+}
+
+/* ================= Medien ================= */
+
+function makeBlankTrack() {
+  const c = document.createElement('canvas');
+  c.width = 640; c.height = 360;
+  const g = c.getContext('2d');
+  const draw = () => { g.fillStyle = '#1a1f23'; g.fillRect(0, 0, c.width, c.height); };
+  draw();
+  setInterval(draw, 1000);
+  return c.captureStream(1).getVideoTracks()[0];
+}
+
+function makeSilentTrack() {
+  return S.audioCtx.createMediaStreamDestination().stream.getAudioTracks()[0];
+}
+
+async function startMic(apply) {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    S.micTrack = s.getAudioTracks()[0];
+    if (apply) setOutTrack('audio', S.micTrack);
+    watchLevel('me', s);
+    return true;
+  } catch (e) {
+    toast('Mikrofon nicht verfügbar: ' + errText(e), 6000);
+    return false;
+  }
+}
+
+async function startCam(apply) {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } });
+    const t = s.getVideoTracks()[0];
+    S.camTrack = t;
+    t.onended = () => {               // z. B. Kamera abgezogen
+      if (S.camTrack !== t) return;
+      S.camTrack = null;
+      if (!S.screenTrack) setOutTrack('video', S.blankTrack);
+      refreshMe();
+    };
+    if (apply && !S.screenTrack) setOutTrack('video', t);
+    return true;
+  } catch (e) {
+    toast('Kamera nicht verfügbar: ' + errText(e), 6000);
+    return false;
+  }
+}
+
+// Ersetzt die ausgehende Spur in allen bestehenden Verbindungen (ohne Neuverhandlung)
+function setOutTrack(kind, track) {
+  const old = kind === 'audio' ? S.out.getAudioTracks()[0] : S.out.getVideoTracks()[0];
+  if (old === track) return;
+  if (old) S.out.removeTrack(old);
+  S.out.addTrack(track);
+  for (const p of S.peers.values()) {
+    const pc = p.call && p.call.peerConnection;
+    if (!pc) continue;
+    for (const sender of pc.getSenders()) {
+      if (sender.track && sender.track.kind === kind) sender.replaceTrack(track).catch(() => {});
+    }
+  }
+}
+
+async function toggleMic() {
+  if (S.micTrack) S.micTrack.enabled = !S.micTrack.enabled;
+  else await startMic(true);
+  refreshMe();
+}
+
+async function toggleCam() {
+  if (S.camTrack) {
+    S.camTrack.stop();
+    S.camTrack = null;
+    if (!S.screenTrack) setOutTrack('video', S.blankTrack);
+  } else {
+    await startCam(true);
+  }
+  refreshMe();
+}
+
+async function toggleScreen() {
+  if (S.screenTrack) { stopScreen(); return; }
+  let s;
+  try {
+    s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 15, max: 30 } }, audio: false });
+  } catch (e) {
+    if (e.name !== 'NotAllowedError') toast('Bildschirmfreigabe nicht möglich: ' + errText(e), 6000);
+    return;
+  }
+  const t = s.getVideoTracks()[0];
+  try { t.contentHint = 'detail'; } catch (e) { /* Schrift bleibt scharf, Bildrate sinkt notfalls */ }
+  S.screenTrack = t;
+  t.onended = () => { if (S.screenTrack === t) stopScreen(); };   // "Freigabe beenden" des Browsers
+  setOutTrack('video', t);
+  refreshMe();
+}
+
+function stopScreen() {
+  const t = S.screenTrack;
+  if (!t) return;
+  S.screenTrack = null;
+  t.stop();
+  setOutTrack('video', S.camTrack || S.blankTrack);
+  refreshMe();
+}
+
+/* ---- Sprechanzeige ---- */
+const meters = new Map();
+function watchLevel(id, stream) {
+  if (!S.audioCtx || !stream.getAudioTracks().length) return;
+  const old = meters.get(id);
+  if (old) try { old.src.disconnect(); } catch (e) { /* bereits getrennt */ }
+  try {
+    const src = S.audioCtx.createMediaStreamSource(stream);
+    const an = S.audioCtx.createAnalyser();
+    an.fftSize = 512;
+    src.connect(an);
+    meters.set(id, { src, an, buf: new Uint8Array(an.fftSize) });
+  } catch (e) { /* ohne Sprechanzeige weiter */ }
+}
+setInterval(() => {
+  for (const [id, m] of meters) {
+    m.an.getByteTimeDomainData(m.buf);
+    let sum = 0;
+    for (const v of m.buf) { const x = (v - 128) / 128; sum += x * x; }
+    const tile = id === 'me' ? S.selfTile : (S.peers.get(id) || {}).tile;
+    if (tile) tile.classList.toggle('speaking', Math.sqrt(sum / m.buf.length) > 0.035);
+  }
+}, 200);
+
+/* ================= Kacheln & Layout ================= */
+
+function makeTile(id) {
+  const el = document.createElement('div');
+  el.className = 'tile';
+  el.dataset.id = id;
+  el.innerHTML = `<video playsinline autoplay${id === 'me' ? ' muted' : ''}></video>
+    <div class="avatar"><span></span></div>
+    <div class="label"><span class="micoff">${svg('micOff')}</span><span class="nm"></span></div>
+    <button class="fs" type="button" title="Vollbild">${svg('expand')}</button>`;
+  el.addEventListener('click', e => {
+    if (e.target.closest('.fs')) return;
+    setSpot(S.spot === id ? null : id);
+  });
+  el.addEventListener('dblclick', () => fullscreen(el));
+  el.querySelector('.fs').addEventListener('click', e => { e.stopPropagation(); fullscreen(el); });
+  return el;
+}
+
+function play(v) {
+  const pr = v.play();
+  if (!pr) return;
+  pr.catch(() => {
+    if (S.audioHint) return;
+    S.audioHint = true;
+    toast('Bitte einmal auf die Seite tippen, um den Ton zu aktivieren.', 6000);
+    document.addEventListener('click', () => {
+      S.audioHint = false;
+      document.querySelectorAll('video').forEach(x => x.play().catch(() => {}));
+    }, { once: true });
+  });
+}
+
+function fullscreen(el) {
+  if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
+  if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+  else {
+    const v = el.querySelector('video');
+    if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();   // iPhone
+  }
+}
+
+function renderSelf() {
+  const t = S.selfTile, v = t.querySelector('video');
+  const track = S.screenTrack || S.camTrack;
+  if (track) {
+    if (!v.srcObject || v.srcObject.getVideoTracks()[0] !== track) { v.srcObject = new MediaStream([track]); play(v); }
+  } else {
+    v.srcObject = null;
+  }
+  t.classList.toggle('camoff', !track);
+  t.classList.toggle('mirror', !S.screenTrack && !!S.camTrack);
+  t.classList.toggle('screen', !!S.screenTrack);
+  t.classList.toggle('muted', !(S.micTrack && S.micTrack.enabled));
+  t.querySelector('.nm').textContent = S.name + ' (Sie)' + (S.screenTrack ? ' · teilt Bildschirm' : '');
+  t.querySelector('.avatar span').textContent = initials(S.name);
+}
+
+function renderTile(p) {
+  const t = p.tile;
+  t.querySelector('.nm').textContent = (p.name || 'Verbinde …') + (p.sharing ? ' · teilt Bildschirm' : '');
+  t.querySelector('.avatar span').textContent = initials(p.name);
+  t.classList.toggle('camoff', !p.cam && !p.sharing);
+  t.classList.toggle('screen', p.sharing);
+  t.classList.toggle('muted', !p.mic);
+}
+
+function renderControls() {
+  const micOn = !!(S.micTrack && S.micTrack.enabled);
+  const set = (btn, icon, cls, on, title) => {
+    btn.querySelector('.ic').innerHTML = svg(icon);
+    btn.classList.toggle(cls, on);
+    btn.title = title;
+  };
+  set($('#micBtn'), micOn ? 'mic' : 'micOff', 'off', !micOn, micOn ? 'Mikrofon stummschalten' : 'Mikrofon einschalten');
+  set($('#camBtn'), S.camTrack ? 'cam' : 'camOff', 'off', !S.camTrack, S.camTrack ? 'Kamera ausschalten' : 'Kamera einschalten');
+  const sb = $('#screenBtn');
+  set(sb, 'screen', 'on', !!S.screenTrack, S.screenTrack ? 'Bildschirmfreigabe beenden' : 'Bildschirm teilen');
+  sb.querySelector('.t').textContent = S.screenTrack ? 'Beenden' : 'Bildschirm';
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)) {
+    sb.disabled = true;
+    sb.title = 'Bildschirm teilen ist in diesem Browser nicht möglich (auf dem Handy die WhatsApp-App oder einen PC nutzen).';
+  }
+}
+
+function refreshMe() {
+  renderSelf();
+  renderControls();
+  broadcastState();
+}
+
+function setSpot(id) {
+  S.spot = id;
+  layout();
+}
+
+function layout() {
+  if (!S.selfTile) return;
+  const stage = $('#stage'), spot = $('#spot'), grid = $('#grid');
+  const tiles = [S.selfTile, ...[...S.peers.values()].map(p => p.tile)];
+  const spotTile = S.spot ? tiles.find(t => t.dataset.id === S.spot) : null;
+  if (S.spot && !spotTile) S.spot = null;
+  stage.classList.toggle('has-spot', !!spotTile);
+  for (const t of tiles) {
+    const target = t === spotTile ? spot : grid;
+    if (t.parentElement !== target) { target.appendChild(t); play(t.querySelector('video')); }
+  }
+  if (!spotTile) {
+    // Spaltenzahl so wählen, dass die 16:9-Kacheln möglichst groß werden
+    const n = grid.children.length, w = grid.clientWidth, h = grid.clientHeight;
+    let best = 1, bestSize = 0;
+    for (let c = 1; c <= n; c++) {
+      const r = Math.ceil(n / c);
+      const size = Math.min((w - 8 * (c + 1)) / c, ((h - 8 * (r + 1)) / r) * 16 / 9);
+      if (size > bestSize) { bestSize = size; best = c; }
+    }
+    grid.style.setProperty('--cols', best);
+    grid.style.setProperty('--rows', Math.ceil(n / best));
+  }
+}
+window.addEventListener('resize', layout);
+
+function updateHeader() {
+  const n = 1 + [...S.peers.values()].filter(p => p.open).length;
+  $('#countLbl').textContent = n === 1 ? '· Sie sind allein im Raum' : `· ${n} Teilnehmer`;
+}
+
+function setStatus(text, ok) {
+  $('#statusLbl').textContent = text ? '· ' + text : '';
+  $('#dot').className = 'dot ' + (ok ? 'ok' : 'bad');
+}
+
+/* ================= Verbindungen ================= */
+/*
+ * Ablauf: Jeder bekommt beim Vermittlungsserver eine zufällige ID. Der Erste im Raum
+ * belegt zusätzlich die Raum-ID ("Lobby") und gibt Neuankömmlingen die Liste der
+ * Teilnehmer. Neue verbinden sich dann direkt mit allen (Vollvermaschung).
+ * Verlässt der Lobby-Inhaber den Raum, übernimmt der Teilnehmer mit der kleinsten ID.
+ */
+
+function connectSignal() {
+  setStatus('verbinde …', false);
+  const me = new Peer(PEER_OPTS);
+  S.me = me;
+  me.on('open', () => { setStatus('', true); findRoom(0); });
+  me.on('connection', onIncomingConn);
+  me.on('call', onIncomingCall);
+  me.on('disconnected', () => {
+    setStatus('Vermittlung getrennt – verbinde neu …', false);
+    setTimeout(() => { if (!me.destroyed && me.disconnected) me.reconnect(); }, 1500);
+  });
+  me.on('error', onPeerError);
+}
+
+function onPeerError(err) {
+  const msg = String((err && err.message) || '');
+  if (err.type === 'peer-unavailable') {
+    if (msg.includes(roomId())) { if (S.lobbyTry) S.lobbyTry(); return; }
+    for (const id of [...S.peers.keys()]) if (msg.includes(id)) dropPeer(id);
+    return;
+  }
+  if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
+    setStatus('keine Verbindung zum Vermittlungsserver', false);
+    return;
+  }
+  if (err.type === 'browser-incompatible') toast('Dieser Browser unterstützt keine Videoverbindungen. Bitte Chrome, Edge, Firefox oder Safari nutzen.', 8000);
+  console.warn('PeerJS:', err.type, msg);
+}
+
+function findRoom(attempt) {
+  if (S.lobby || S.lobbyTry || !S.me || S.me.destroyed) return;
+  const c = S.me.connect(roomId(), { reliable: true });
+  let done = false;
+  const timer = setTimeout(() => fail(), 7000);
+  function finish() { done = true; clearTimeout(timer); S.lobbyTry = null; }
+  function fail() {
+    if (done) return;
+    finish();
+    try { c.close(); } catch (e) { /* egal */ }
+    claimLobby(attempt);
+  }
+  S.lobbyTry = fail;
+  c.on('open', () => c.send({ t: 'who' }));
+  c.on('data', d => {
+    if (done || !d || d.t !== 'members') return;
+    finish();
+    setTimeout(() => c.close(), 500);
+    for (const id of d.ids || []) connectTo(id);
+  });
+  c.on('error', fail);
+}
+
+function claimLobby(attempt) {
+  if (S.lobby || !S.me || S.me.destroyed) return;
+  const lp = new Peer(roomId(), PEER_OPTS);
+  let ok = false;
+  lp.on('open', () => {
+    ok = true;
+    S.lobby = lp;
+    broadcastState();
+    if (!S.peers.size) toast('Raum eröffnet. Laden Sie die anderen per WhatsApp ein.');
+  });
+  lp.on('connection', c => {
+    c.on('data', d => {
+      if (d && d.t === 'who') c.send({ t: 'members', ids: [S.me.id, ...[...S.peers.values()].filter(p => p.open).map(p => p.id)] });
+    });
+  });
+  lp.on('error', err => {
+    if (!ok && err.type === 'unavailable-id') {
+      // Jemand war schneller (oder die alte Lobby ist noch registriert): erneut suchen
+      lp.destroy();
+      if (attempt < 30) setTimeout(() => findRoom(attempt + 1), 1000 + Math.random() * 1500);
+      return;
+    }
+    console.warn('Lobby:', err.type, err.message);
+  });
+  lp.on('disconnected', () => setTimeout(() => { if (!lp.destroyed && lp.disconnected) lp.reconnect(); }, 2000));
+}
+
+// Alle 15 s: Hat der Raum noch einen Lobby-Inhaber? Sonst übernimmt die kleinste ID.
+setInterval(() => {
+  if (!S.me || S.me.destroyed || S.me.disconnected || S.lobby || S.lobbyTry) return;
+  const open = [...S.peers.values()].filter(p => p.open);
+  if (open.some(p => p.lobby)) return;
+  const ids = [S.me.id, ...open.map(p => p.id)].sort();
+  if (ids[0] === S.me.id) findRoom(0);
+}, 15000);
+
+function addPeer(id, name) {
+  const p = { id, name: name ? String(name).slice(0, 40) : '', conn: null, call: null,
+    cam: true, mic: true, sharing: false, lobby: false, open: false, gotState: false };
+  p.tile = makeTile(id);
+  S.peers.set(id, p);
+  renderTile(p);
+  layout();
+  if (S.peers.size === 6) toast('Ab ca. 6 Teilnehmern kann es ruckeln – jeder sendet an jeden.', 6000);
+  return p;
+}
+
+function dropPeer(id) {
+  const p = S.peers.get(id);
+  if (!p) return;
+  S.peers.delete(id);
+  try { if (p.conn) p.conn.close(); } catch (e) { /* egal */ }
+  try { if (p.call) p.call.close(); } catch (e) { /* egal */ }
+  const m = meters.get(id);
+  if (m) { try { m.src.disconnect(); } catch (e) { /* egal */ } meters.delete(id); }
+  p.tile.remove();
+  layout();
+  updateHeader();
+  if (p.gotState) toast(`${p.name} hat die Konferenz verlassen`);
+  if (p.lobby && !S.lobby) {
+    const ids = [S.me.id, ...S.peers.keys()].sort();
+    if (ids[0] === S.me.id) setTimeout(() => findRoom(0), 1500);
+  }
+  broadcastState();
+}
+
+// Bei doppelten Verbindungen (beide Seiten verbinden gleichzeitig) gewinnt die vom kleineren Initiator
+const preferNew = (oldC, newC) => newC._init <= oldC._init;
+
+function connectTo(id) {
+  if (!id || !S.me || id === S.me.id || S.peers.has(id)) return;
+  const p = addPeer(id, '');
+  const c = S.me.connect(id, { reliable: true, metadata: { name: S.name } });
+  c._init = S.me.id;
+  attachConn(p, c);
+  const call = S.me.call(id, S.out, { metadata: { name: S.name } });
+  if (call) { call._init = S.me.id; attachCall(p, call); }
+}
+
+function onIncomingConn(c) {
+  c._init = c.peer;
+  const p = S.peers.get(c.peer) || addPeer(c.peer, c.metadata && c.metadata.name);
+  attachConn(p, c);
+}
+
+function onIncomingCall(call) {
+  call._init = call.peer;
+  const p = S.peers.get(call.peer) || addPeer(call.peer, call.metadata && call.metadata.name);
+  if (p.call && p.call !== call && !preferNew(p.call, call)) { call.close(); return; }
+  call.answer(S.out);
+  attachCall(p, call);
+}
+
+function attachConn(p, c) {
+  if (p.conn && p.conn !== c) {
+    if (!preferNew(p.conn, c)) { c.close(); return; }
+    const old = p.conn;
+    p.conn = c;
+    old.close();
+  } else {
+    p.conn = c;
+  }
+  c.on('open', () => {
+    if (p.conn !== c) return;
+    p.open = true;
+    updateHeader();
+    broadcastState();
+  });
+  c.on('data', d => { if (p.conn === c) onData(p, d); });
+  c.on('close', () => setTimeout(() => { if (p.conn === c) dropPeer(p.id); }, 1500));
+  c.on('error', () => {});
+}
+
+function attachCall(p, call) {
+  if (p.call && p.call !== call) {
+    if (!preferNew(p.call, call)) { call.close(); return; }
+    const old = p.call;
+    p.call = call;
+    old.close();
+  } else {
+    p.call = call;
+  }
+  call.on('stream', stream => {
+    if (p.call !== call) return;
+    const v = p.tile.querySelector('video');
+    if (v.srcObject !== stream) { v.srcObject = stream; play(v); watchLevel(p.id, stream); }
+  });
+  call.on('close', () => {
+    if (p.call !== call) return;
+    p.call = null;
+    p.tile.querySelector('video').srcObject = null;
+  });
+  call.on('error', () => {});
+}
+
+function stateMsg() {
+  return {
+    t: 'state', name: S.name,
+    cam: !!S.camTrack, mic: !!(S.micTrack && S.micTrack.enabled),
+    sharing: !!S.screenTrack, lobby: !!S.lobby,
+    peers: [...S.peers.values()].filter(p => p.open).map(p => p.id)
+  };
+}
+
+function sendTo(p, msg) {
+  if (p.conn && p.conn.open) try { p.conn.send(msg); } catch (e) { /* Verbindung bricht gerade ab */ }
+}
+function broadcast(msg) { for (const p of S.peers.values()) sendTo(p, msg); }
+function broadcastState() { if (S.me) broadcast(stateMsg()); }
+
+function onData(p, d) {
+  if (!d || typeof d !== 'object') return;
+  if (d.t === 'state') {
+    const first = !p.gotState, wasSharing = p.sharing;
+    p.gotState = true;
+    p.name = String(d.name || 'Gast').slice(0, 40);
+    p.cam = !!d.cam; p.mic = !!d.mic; p.lobby = !!d.lobby; p.sharing = !!d.sharing;
+    if (first && p.conn && p.conn._init === p.id) toast(`${p.name} ist beigetreten`);
+    if (p.sharing && !wasSharing) { setSpot(p.id); toast(`${p.name} teilt den Bildschirm`); }
+    if (!p.sharing && wasSharing && S.spot === p.id) setSpot(null);
+    renderTile(p);
+    // Teilnehmer, die gleichzeitig beigetreten sind, finden sich hierüber nachträglich
+    if (Array.isArray(d.peers)) {
+      setTimeout(() => {
+        for (const id of d.peers) if (id !== S.me.id && !S.peers.has(id) && S.me.id < id) connectTo(id);
+      }, 2500);
+    }
+  } else if (d.t === 'chat') {
+    addChat(p.name || 'Gast', String(d.text || '').slice(0, 2000), false);
+  } else if (d.t === 'bye') {
+    dropPeer(p.id);
+  }
+}
+
+/* ================= Chat ================= */
+
+function addChat(from, text, mine) {
+  const el = document.createElement('div');
+  el.className = 'msg';
+  el.innerHTML = `<div class="who">${esc(mine ? 'Sie' : from)} · ${new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}</div><div class="tx">${linkify(text)}</div>`;
+  const box = $('#msgs');
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+  if (!mine && $('#chat').hidden) {
+    S.unread++;
+    $('#unread').textContent = S.unread;
+    $('#unread').hidden = false;
+    toast(`${from}: ${text.slice(0, 80)}`);
+  }
+}
+
+function toggleChat(show) {
+  const chat = $('#chat');
+  chat.hidden = show === undefined ? !chat.hidden : !show;
+  if (!chat.hidden) {
+    S.unread = 0;
+    $('#unread').hidden = true;
+    $('#chatIn').focus();
+  }
+  requestAnimationFrame(layout);
+}
+
+$('#chatForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const text = $('#chatIn').value.trim();
+  if (!text) return;
+  broadcast({ t: 'chat', text });
+  addChat(S.name, text, true);
+  $('#chatIn').value = '';
+});
+
+/* ================= Einladen ================= */
+
+const inviteLink = () => location.href.split('#')[0] + '#r=' + S.room;
+const inviteText = () => `Einladung zur Bildschirmkonferenz (Raum ${fmtRoom(S.room)}):\n${inviteLink()}\n\nLink im Browser öffnen (Chrome, Edge oder Safari), Namen eingeben und „Konferenz betreten“ tippen.`;
+
+function sendWhatsApp() {
+  window.open('https://wa.me/?text=' + encodeURIComponent(inviteText()), '_blank', 'noopener');
+}
+
+function openInvite() {
+  $('#linkOut').value = inviteLink();
+  $('#shareBtn').hidden = !navigator.share;
+  $('#invite').hidden = false;
+}
+
+$('#waBtn').addEventListener('click', sendWhatsApp);
+$('#copyBtn').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(inviteLink()); toast('Link kopiert'); }
+  catch (e) { $('#linkOut').select(); toast('Bitte den markierten Link mit Strg+C kopieren'); }
+});
+$('#shareBtn').addEventListener('click', () => {
+  navigator.share({ title: 'Bildschirmkonferenz', text: inviteText() }).catch(() => {});
+});
+$('#inviteClose').addEventListener('click', () => { $('#invite').hidden = true; });
+$('#invite').addEventListener('click', e => { if (e.target.id === 'invite') $('#invite').hidden = true; });
+
+/* ================= Start & Ende ================= */
+
+function readLobby() {
+  S.room = cleanRoom($('#roomIn').value) || newRoom();
+  $('#roomIn').value = fmtRoom(S.room);
+  history.replaceState(null, '', '#r=' + S.room);
+}
+
+async function join() {
+  const name = $('#nameIn').value.trim();
+  if (!name) { $('#nameIn').focus(); toast('Bitte zuerst Ihren Namen eingeben.'); return; }
+  if (typeof Peer === 'undefined') { toast('Die Verbindungsbibliothek konnte nicht geladen werden. Internetverbindung prüfen.', 8000); return; }
+  S.name = name.slice(0, 40);
+  store('bk-name', S.name);
+  readLobby();
+  $('#joinBtn').disabled = true;
+
+  const AC = window.AudioContext || window.webkitAudioContext;
+  S.audioCtx = new AC();
+  S.blankTrack = makeBlankTrack();
+  S.silentTrack = makeSilentTrack();
+  if ($('#micChk').checked) await startMic(false);
+  if ($('#camChk').checked) await startCam(false);
+  S.out = new MediaStream([S.micTrack || S.silentTrack, S.camTrack || S.blankTrack]);
+
+  $('#lobby').hidden = true;
+  $('#call').hidden = false;
+  $('#roomLbl').textContent = fmtRoom(S.room);
+  document.title = 'Konferenz ' + fmtRoom(S.room);
+  S.selfTile = makeTile('me');
+  S.started = true;
+  renderSelf();
+  renderControls();
+  updateHeader();
+  layout();
+  connectSignal();
+}
+
+function cleanup() {
+  for (const t of [S.micTrack, S.camTrack, S.screenTrack]) if (t) t.stop();
+  try { if (S.lobby) S.lobby.destroy(); } catch (e) { /* egal */ }
+  try { if (S.me) S.me.destroy(); } catch (e) { /* egal */ }
+}
+
+function leave() {
+  broadcast({ t: 'bye' });
+  setTimeout(() => { cleanup(); location.reload(); }, 250);
+}
+
+window.addEventListener('pagehide', () => {
+  if (!S.started) return;
+  broadcast({ t: 'bye' });
+  cleanup();
+});
+
+/* ---- Bedienelemente ---- */
+$('#chatClose').innerHTML = svg('close');
+$('#inviteBtn .ic').innerHTML = svg('invite');
+$('#chatBtn .ic').innerHTML = svg('chat');
+$('#leaveBtn .ic').innerHTML = svg('phone');
+$('#micBtn').addEventListener('click', toggleMic);
+$('#camBtn').addEventListener('click', toggleCam);
+$('#screenBtn').addEventListener('click', toggleScreen);
+$('#inviteBtn').addEventListener('click', openInvite);
+$('#chatBtn').addEventListener('click', () => toggleChat());
+$('#chatClose').addEventListener('click', () => toggleChat(false));
+$('#leaveBtn').addEventListener('click', leave);
+$('#joinBtn').addEventListener('click', join);
+$('#nameIn').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
+$('#newRoomBtn').addEventListener('click', () => { $('#roomIn').value = fmtRoom(newRoom()); readLobby(); });
+$('#waLobbyBtn').addEventListener('click', () => { readLobby(); sendWhatsApp(); });
+
+/* ---- Startseite vorbereiten ---- */
+(function init() {
+  const fromLink = cleanRoom(new URLSearchParams(location.hash.slice(1)).get('r'));
+  $('#roomIn').value = fmtRoom(fromLink || newRoom());
+  $('#nameIn').value = store('bk-name') || '';
+  if (fromLink) {
+    $('#joinBtn').textContent = 'Konferenz beitreten';
+    $('#waLobbyBtn').hidden = true;
+  }
+  const warn = [];
+  if (location.protocol === 'file:') warn.push('Die App ist als lokale Datei geöffnet. Zum Ausprobieren reicht das, aber Eingeladene können diesen Link nicht öffnen. Dafür muss die App im Internet liegen (siehe ANLEITUNG.md).');
+  if (!window.isSecureContext) warn.push('Kamera und Mikrofon funktionieren nur, wenn die Seite über https:// geöffnet wird.');
+  if (typeof Peer === 'undefined') warn.push('Die Verbindungsbibliothek (PeerJS) konnte nicht geladen werden. Bitte die Internetverbindung prüfen.');
+  if (warn.length) { $('#warn').innerHTML = warn.map(esc).join('<br><br>'); $('#warn').hidden = false; }
+  ($('#nameIn').value ? $('#joinBtn') : $('#nameIn')).focus();
+})();
+</script>
+</body>
+</html>
